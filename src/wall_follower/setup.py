@@ -31,6 +31,7 @@ setup(
     entry_points={
         'console_scripts': [
         	'wall_follower_node = wall_follower.wall_follower_node:main',
+                'data_logger = wall_follower.data_logger:main',
         ],
     },
 )

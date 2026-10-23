@@ -1,4 +1,5 @@
 import math
+import time
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -45,6 +46,8 @@ class WallFollower(Node):
         self.declare_parameter('kd_w', 1.5)
         self.declare_parameter('kp_v', 0.5)
         self.declare_parameter('front_stop', 0.30)
+        self.declare_parameter('front_clear', 1.2)     # front distance that ends a corner turn
+        self.turning = False
 
         self.pub = self.create_publisher(Twist, 'cmd_vel', 10)
         self.sub = self.create_subscription(
@@ -93,8 +96,13 @@ class WallFollower(Node):
         dist = b * math.cos(alpha) + self.p('lookahead') * math.sin(alpha)
         err = dist - self.p('target')
 
+        
         cmd = Twist()
-        if front < self.p('front_stop'):                 # inside corner
+        if front < self.p('front_stop'):
+            self.turning = True
+        elif self.turning and front > self.p('front_clear'):
+            self.turning = False
+        if self.turning:                                 # inside corner: rotate in place
             cmd.angular.z = -sign * 0.8
         elif min(a, b) > 1.0:                            # wall lost
             cmd.linear.x = self.p('v_min')
@@ -115,17 +123,23 @@ class WallFollower(Node):
 
 
 def main():
-    rclpy.init()
+    rclpy.init(signal_handler_options=rclpy.signals.SignalHandlerOptions.NO)
     node = WallFollower()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        node.pub.publish(Twist())
+        try:
+            for _ in range(5):
+                node.pub.publish(Twist())
+                time.sleep(0.05)
+        except Exception:
+            pass
         node.log.close()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
