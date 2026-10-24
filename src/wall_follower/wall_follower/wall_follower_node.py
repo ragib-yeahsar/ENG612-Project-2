@@ -64,7 +64,7 @@ class WallFollower(Node):
     def beam(self, msg, deg, half=3):
         """Median range around an angle (deg, 0 = forward, CCW positive)."""
         n = len(msg.ranges)
-        c = int(round(math.radians(deg) / msg.angle_increment)) % n
+        c = int(round((math.radians(deg) - msg.angle_min) / msg.angle_increment)) % n
         vals = []
         for k in range(-half, half + 1):
             r = msg.ranges[(c + k) % n]
