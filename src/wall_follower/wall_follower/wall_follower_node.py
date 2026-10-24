@@ -54,7 +54,7 @@ class WallFollower(Node):
             LaserScan, 'scan', self.scan_cb, qos_profile_sensor_data)
         self.pid_w = None
         self.last_t = None
-        self.log = open('/tmp/wall_log.csv', 'w')
+        self.log = open('/tmp/wall_log.csv', 'w', buffering=1)
         self.log.write('t,dist,err,v,w,front\n')
         self.get_logger().info('wall_follower started')
 
@@ -79,8 +79,11 @@ class WallFollower(Node):
             self.pid_w = PID(self.p('kp_w'), self.p('ki_w'), self.p('kd_w'),
                              -1.5, 1.5, 0.5)
         t = self.get_clock().now().nanoseconds * 1e-9
-        dt = 0.0 if self.last_t is None else t - self.last_t
-        self.last_t = t
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if self.last_t is not None and stamp <= self.last_t:
+            return                                   # out-of-order scan, ignore
+        dt = 0.0 if self.last_t is None else min(stamp - self.last_t, 0.5)
+        self.last_t = stamp
 
         sign = 1.0 if self.p('side') == 'left' else -1.0
         side_deg = 90 if sign > 0 else 270
