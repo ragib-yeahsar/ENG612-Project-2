@@ -32,6 +32,31 @@ class PID:
         return clamp(out, self.out_min, self.out_max)
         
         
+class LinearPID(PID):
+    """PID for forward speed with a low-pass filtered derivative."""
+
+    def __init__(self, kp, ki, kd, out_min, out_max, i_limit, d_alpha=0.3):
+        super().__init__(kp, ki, kd, out_min, out_max, i_limit)
+        self.d_alpha = d_alpha
+        self.d_filt = 0.0
+
+    def reset(self):
+        self.integral = 0.0
+        self.prev_error = None
+        self.d_filt = 0.0
+
+    def step(self, error, dt):
+        self.integral = clamp(self.integral + error * dt, -self.i_limit, self.i_limit)
+        if self.prev_error is None or dt <= 0.0:
+            raw = 0.0
+        else:
+            raw = (error - self.prev_error) / dt
+        self.prev_error = error
+        self.d_filt += self.d_alpha * (raw - self.d_filt)
+        out = self.kp * error + self.ki * self.integral + self.kd * self.d_filt
+        return clamp(out, self.out_min, self.out_max)
+
+
 class WallFollower(Node):
     def __init__(self):
         super().__init__('wall_follower')
@@ -45,6 +70,9 @@ class WallFollower(Node):
         self.declare_parameter('ki_w', 0.0)
         self.declare_parameter('kd_w', 1.5)
         self.declare_parameter('kp_v', 0.5)
+        self.declare_parameter('ki_v', 0.0)
+        self.declare_parameter('kd_v', 0.15)
+        self.declare_parameter('c_err', 2.0)
         self.declare_parameter('front_stop', 0.30)
         self.declare_parameter('front_clear', 1.2)     # front distance that ends a corner turn
         self.turning = False
@@ -53,6 +81,7 @@ class WallFollower(Node):
         self.sub = self.create_subscription(
             LaserScan, 'scan', self.scan_cb, qos_profile_sensor_data)
         self.pid_w = None
+        self.pid_v = None
         self.last_t = None
         self.log = open('/tmp/wall_log.csv', 'w', buffering=1)
         self.log.write('t,dist,err,v,w,front\n')
@@ -78,6 +107,8 @@ class WallFollower(Node):
         if self.pid_w is None:
             self.pid_w = PID(self.p('kp_w'), self.p('ki_w'), self.p('kd_w'),
                              -1.5, 1.5, 0.5)
+            self.pid_v = LinearPID(self.p('kp_v'), self.p('ki_v'), self.p('kd_v'),
+                                   0.0, self.p('v_max'), 0.2)
         t = self.get_clock().now().nanoseconds * 1e-9
         stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         if self.last_t is not None and stamp <= self.last_t:
@@ -106,6 +137,7 @@ class WallFollower(Node):
         elif self.turning and front > self.p('front_clear'):
             self.turning = False
         if self.turning:                                 # inside corner: rotate in place
+            self.pid_v.reset()
             cmd.angular.z = -sign * 0.8
         elif min(a, b) > 1.0:                            # wall lost
             cmd.linear.x = self.p('v_min')
@@ -114,6 +146,11 @@ class WallFollower(Node):
             cmd.angular.z = sign * self.pid_w.step(err, dt)
             if self.p('mode') == 'baseline':
                 cmd.linear.x = self.p('v_max')
+            elif self.p('mode') == 'extended_pid':
+                # second PID: input is the clearance error, reduced by the wall-distance error
+                e_v = (front - self.p('front_stop')) - self.p('c_err') * abs(err)
+                v = self.pid_v.step(e_v, dt)
+                cmd.linear.x = clamp(v, self.p('v_min'), self.p('v_max'))
             else:
                 v_front = clamp(self.p('kp_v') * (front - self.p('front_stop')),
                                 0.0, self.p('v_max'))
