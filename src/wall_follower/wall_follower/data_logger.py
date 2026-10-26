@@ -185,6 +185,10 @@ class DataLogger(Node):
                          f'{self.w_cmd:.3f}', f'{near:.4f}', f'{side:.4f}',
                          f'{err:.4f}', f'{abs(err) * 100:.2f}'])
         self.f.flush()
+        self.get_logger().info(
+            't=%5.1f s  wall=%.3f m  err=%+.1f cm  v=%.3f m/s  w=%+.2f rad/s'
+            % (now - self.t0, side, err * 100, self.v_cmd, self.w_cmd),
+            throttle_duration_sec=1.0)
 
 
 def main():
